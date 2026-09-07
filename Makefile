@@ -11,11 +11,12 @@ OBJS = main.o SpatialGrid.o SessionManager.o
 ifeq ($(OS),Windows_NT)
     LDFLAGS = -lws2_32
     RM = del /Q
-    CLEAN_EXTS = main.o SpatialGrid.o SessionManager.o game_server.exe game_server 2>nul || true
+    CLEAN_EXTS = main.o SpatialGrid.o SessionManager.o game_server game_server.exe *.exe 2>nul || true
 else
     LDFLAGS = -pthread
     RM = rm -f
-    CLEAN_EXTS = $(OBJS) $(TARGET)
+    # Added game_server.exe and *.exe here so it cleans them up even if crossed over from Windows
+    CLEAN_EXTS = $(OBJS) $(TARGET) game_server.exe *.exe
 endif
 
 # Default target
@@ -30,10 +31,10 @@ $(TARGET): $(OBJS)
 %.o: src/%.cpp
 	$(CXX) $(CXXFLAGS) -c $< -o $@
 
-# Clean up build artifacts (Cross-platform compatible)
+# Clean up build artifacts (Cross-platform compatible, including .exe files)
 clean:
 	$(RM) $(CLEAN_EXTS)
-	@echo "[Clean] Build artifacts removed."
+	@echo "[Clean] Build artifacts and executables removed."
 
 # Phony targets
 .PHONY: all clean

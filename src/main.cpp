@@ -102,7 +102,7 @@ int main() {
     }
 #endif
 
-    std::cout << "[Server] Listening for UDP packets on port " << PORT << " at 20 TPS (Bidirectional)...\n";
+    std::cout << "[Server] Listening for UDP packets on port " << PORT << " at 20 TPS (Bidirectional + Logs)...\n";
 
     char buffer[1024];
     sockaddr_in client_addr{};
@@ -135,6 +135,13 @@ int main() {
                 // Register endpoint and coordinates
                 session_manager.update_activity(packet.player_id, client_addr);
                 spatial_grid.update_player(packet.player_id, packet.x, packet.y);
+
+                auto nearby = spatial_grid.get_nearby_players(packet.x, packet.y, 1);
+
+                // Re-added debug log to print incoming packets on the server terminal
+                std::cout << "[Packet Received] ID: " << packet.player_id 
+                          << " | Pos: (" << packet.x << ", " << packet.y << ")"
+                          << " | Nearby Peers: " << nearby.size() << "\n";
             }
         }
 

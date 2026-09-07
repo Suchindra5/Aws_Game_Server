@@ -12,7 +12,6 @@ INTERVAL = 1.0 / TICK_RATE
 
 def run_client(player_id):
     client_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    # Set a short timeout so recvfrom doesn't block infinitely
     client_socket.settimeout(0.1)
     
     # Start each client at a random initial position
@@ -38,10 +37,11 @@ def run_client(player_id):
                 data, _ = client_socket.recvfrom(1024)
                 if len(data) == 8:  # 2 uint32 fields = 8 bytes
                     packet_type, nearby_count = struct.unpack("II", data)
-                    # Uncomment below if you want to verify responses rolling in per client
-                    # print(f"[Client {player_id}] Server Response -> Nearby Peers: {nearby_count}")
+                    # Print only for Client 1 to avoid flooding the screen too fast
+                    if player_id == 1 and sequence % 20 == 0:
+                        print(f"[Client {player_id}] Sent Pos ({x:.1f}, {y:.1f}) | Server Response -> Nearby Peers: {nearby_count}")
             except socket.timeout:
-                pass  # Normal for UDP if a packet frame skips
+                pass  
             
             time.sleep(INTERVAL)
             
@@ -52,13 +52,11 @@ if __name__ == "__main__":
     print(f"[Spawner] Launching {NUM_CLIENTS} concurrent bidirectional clients...")
     threads = []
 
-    # Spawn each client in its own background thread
     for i in range(1, NUM_CLIENTS + 1):
         t = threading.Thread(target=run_client, args=(i,))
         threads.append(t)
         t.start()
-        time.sleep(0.05) # Stagger starts slightly
+        time.sleep(0.05)
 
-    # Keep main thread alive
     for t in threads:
         t.join()
