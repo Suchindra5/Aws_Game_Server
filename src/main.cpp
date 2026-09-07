@@ -36,6 +36,12 @@ struct ClientPacket {
     float y;
 };
 
+// Structure matching the server-to-client response packet (8 bytes total)
+struct ServerResponsePacket {
+    uint32_t packet_type = 1; 
+    uint32_t nearby_count;
+};
+
 int main() {
     // 1. Initialize Network Stack (Winsock on Windows, no-op on Linux)
 #ifdef _WIN32
@@ -96,7 +102,7 @@ int main() {
     }
 #endif
 
-    std::cout << "[Server] Listening for UDP packets on port " << PORT << " at 20 TPS...\n";
+    std::cout << "[Server] Listening for UDP packets on port " << PORT << " at 20 TPS (Bidirectional)...\n";
 
     char buffer[1024];
     sockaddr_in client_addr{};
@@ -107,9 +113,9 @@ int main() {
 
         // 5. Ingestion Loop: Read all available non-blocking UDP packets for this tick
         while (true) {
-            client_addr_len = sizeof(client_addr); // Reset length every iteration (critical fix)
+            client_addr_len = sizeof(client_addr); 
             int bytes_received = recvfrom(server_fd, buffer, sizeof(buffer), 0,
-                                           (struct sockaddr*)&client_addr, &client_addr_len);
+                                     (struct sockaddr*)&client_addr, &client_addr_len);
             
             if (bytes_received == SOCKET_ERROR) {
 #ifdef _WIN32
@@ -118,7 +124,7 @@ int main() {
 #else
                 if (errno == EWOULDBLOCK || errno == EAGAIN) { break; }
 #endif
-                break; // Other read error
+                break; 
             }
 
             // Validate packet size matches our expected structure
@@ -126,26 +132,35 @@ int main() {
                 ClientPacket packet;
                 std::memcpy(&packet, buffer, sizeof(ClientPacket));
 
-                // Update Session & Spatial Grid with real client data
-                session_manager.update_activity(packet.player_id);
+                // Register endpoint and coordinates
+                session_manager.update_activity(packet.player_id, client_addr);
                 spatial_grid.update_player(packet.player_id, packet.x, packet.y);
-
-                auto nearby = spatial_grid.get_nearby_players(packet.x, packet.y, 1);
-
-                std::cout << "[Packet Received] ID: " << packet.player_id 
-                          << " | Pos: (" << packet.x << ", " << packet.y << ")"
-                          << " | Nearby Peers: " << nearby.size() << "\n";
             }
         }
 
-        // 6. Timeout Cleanup: Prune silent/disconnected players
+        // 6. Outbound Broadcast Loop: Send state back to all active connected clients
+        auto active_sessions = session_manager.get_active_sessions();
+        for (const auto& session : active_sessions) {
+            float px = spatial_grid.get_player_x(session.player_id);
+            float py = spatial_grid.get_player_y(session.player_id);
+            auto nearby = spatial_grid.get_nearby_players(px, py, 1);
+
+            ServerResponsePacket response;
+            response.nearby_count = static_cast<uint32_t>(nearby.size());
+
+            // Send state back to the client's endpoint via UDP
+            sendto(server_fd, (char*)&response, sizeof(response), 0,
+                   (struct sockaddr*)&session.address, sizeof(session.address));
+        }
+
+        // 7. Timeout Cleanup: Prune silent/disconnected players
         std::vector<uint32_t> dropped_players = session_manager.get_timed_out_players(TIMEOUT_SECONDS);
         for (uint32_t dropped_id : dropped_players) {
             spatial_grid.remove_player(dropped_id);
             std::cout << "[Server] Player " << dropped_id << " timed out and was removed from the grid.\n";
         }
 
-        // 7. Maintain 20 TPS Tick Rate
+        // 8. Maintain 20 TPS Tick Rate
         auto tick_end = std::chrono::steady_clock::now();
         auto elapsed = tick_end - tick_start;
         if (elapsed < TICK_RATE) {

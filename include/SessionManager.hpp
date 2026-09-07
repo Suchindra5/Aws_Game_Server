@@ -6,18 +6,26 @@
 #include <cstdint>
 #include <chrono>
 
+#ifdef _WIN32
+    #include <winsock2.h>
+#else
+    #include <netinet/in.h>
+#endif
+
+struct SessionInfo {
+    uint32_t player_id;
+    sockaddr_in address;
+    std::chrono::steady_clock::time_point last_active;
+};
+
 class SessionManager {
 private:
-    std::unordered_map<uint32_t, std::chrono::steady_clock::time_point> last_seen;
+    std::unordered_map<uint32_t, SessionInfo> sessions;
     
 public:
-    // Update or record the last active timestamp for a player
-    void update_activity(uint32_t player_id);
-
-    // Explicitly remove a player session
+    void update_activity(uint32_t player_id, const sockaddr_in& addr);
     void remove_player(uint32_t player_id);
-
-    // Check all sessions and return IDs of players who exceeded the timeout threshold
+    std::vector<SessionInfo> get_active_sessions() const;
     std::vector<uint32_t> get_timed_out_players(double timeout_seconds);
 };
 

@@ -16,17 +16,25 @@ struct CellHash {
     }
 };
 
+struct PlayerPosition {
+    float x;
+    float y;
+};
+
 class SpatialGrid {
 private:
     float cell_size;
     std::unordered_map<std::pair<int, int>, std::unordered_set<uint32_t>, CellHash> grid;
     std::unordered_map<uint32_t, std::pair<int, int>> player_cells;
+    std::unordered_map<uint32_t, PlayerPosition> player_positions;
 
 public:
     explicit SpatialGrid(float size);
 
     void update_player(uint32_t player_id, float x, float y);
     void remove_player(uint32_t player_id);
+    float get_player_x(uint32_t player_id) const;
+    float get_player_y(uint32_t player_id) const;
     std::vector<uint32_t> get_nearby_players(float x, float y, int radius_cells) const;
     size_t get_tracked_player_count() const;
 };
