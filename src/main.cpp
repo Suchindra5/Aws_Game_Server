@@ -4,12 +4,27 @@
 #include <vector>
 #include <cstring>
 
-// Windows Networking Headers
-#include <winsock2.h>
-#include <ws2tcpip.h>
-
-// Tell the compiler to link the Winsock library automatically (MinGW specific)
-#pragma comment(lib, "ws2_32.lib")
+// Cross-Platform Networking Headers
+#ifdef _WIN32
+    #include <winsock2.h>
+    #include <ws2tcpip.h>
+    #pragma comment(lib, "ws2_32.lib")
+    typedef int socklen_t;
+#else
+    #include <sys/types.h>
+    #include <sys/socket.h>
+    #include <netinet/in.h>
+    #include <arpa/inet.h>
+    #include <fcntl.h>
+    #include <unistd.h>
+    #include <errno.h>
+    
+    // Define Windows socket types/macros for Linux compatibility
+    typedef int SOCKET;
+    const SOCKET INVALID_SOCKET = -1;
+    const int SOCKET_ERROR = -1;
+    inline int closesocket(SOCKET s) { return close(s); }
+#endif
 
 #include "SpatialGrid.hpp"
 #include "SessionManager.hpp"
@@ -22,12 +37,14 @@ struct ClientPacket {
 };
 
 int main() {
-    // 1. Initialize Winsock (Required on Windows before using any sockets)
+    // 1. Initialize Network Stack (Winsock on Windows, no-op on Linux)
+#ifdef _WIN32
     WSADATA wsaData;
     if (WSAStartup(MAKEWORD(2, 2), &wsaData) != 0) {
         std::cerr << "[Error] WSAStartup failed.\n";
         return 1;
     }
+#endif
 
     SpatialGrid spatial_grid(50.0f); // 50x50 unit grid cells
     SessionManager session_manager;
@@ -36,11 +53,13 @@ int main() {
     const auto TICK_RATE = std::chrono::milliseconds(50); // 20 TPS loop (50ms per tick)
     const int PORT = 8080;
 
-    // 2. Create UDP Socket (On Windows, socket descriptors are of type 'SOCKET')
+    // 2. Create UDP Socket
     SOCKET server_fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
     if (server_fd == INVALID_SOCKET) {
-        std::cerr << "[Error] Failed to create socket. Error: " << WSAGetLastError() << "\n";
+        std::cerr << "[Error] Failed to create socket.\n";
+#ifdef _WIN32
         WSACleanup();
+#endif
         return 1;
     }
 
@@ -51,43 +70,55 @@ int main() {
     address.sin_port = htons(PORT);
 
     if (bind(server_fd, (struct sockaddr*)&address, sizeof(address)) == SOCKET_ERROR) {
-        std::cerr << "[Error] Failed to bind socket to port " << PORT << ". Error: " << WSAGetLastError() << "\n";
+        std::cerr << "[Error] Failed to bind socket to port " << PORT << ".\n";
         closesocket(server_fd);
+#ifdef _WIN32
         WSACleanup();
+#endif
         return 1;
     }
 
-    // 4. Set Socket to Non-Blocking Mode on Windows using ioctlsocket
-    u_long mode = 1; // 1 to enable non-blocking, 0 for blocking
+    // 4. Set Socket to Non-Blocking Mode (Cross-platform)
+#ifdef _WIN32
+    u_long mode = 1;
     if (ioctlsocket(server_fd, FIONBIO, &mode) != 0) {
         std::cerr << "[Error] Failed to set non-blocking mode.\n";
         closesocket(server_fd);
         WSACleanup();
         return 1;
     }
+#else
+    int flags = fcntl(server_fd, F_GETFL, 0);
+    if (flags < 0 || fcntl(server_fd, F_SETFL, flags | O_NONBLOCK) < 0) {
+        std::cerr << "[Error] Failed to set non-blocking mode.\n";
+        closesocket(server_fd);
+        return 1;
+    }
+#endif
 
-    std::cout << "[Server] Listening for UDP packets on port " << PORT << " at 20 TPS (Windows Winsock)...\n";
+    std::cout << "[Server] Listening for UDP packets on port " << PORT << " at 20 TPS...\n";
 
     char buffer[1024];
     sockaddr_in client_addr{};
-    int client_addr_len = sizeof(client_addr); // Note: int on Windows, socklen_t on Linux
+    socklen_t client_addr_len = sizeof(client_addr);
 
     while (true) {
         auto tick_start = std::chrono::steady_clock::now();
 
         // 5. Ingestion Loop: Read all available non-blocking UDP packets for this tick
         while (true) {
+            client_addr_len = sizeof(client_addr); // Reset length every iteration (critical fix)
             int bytes_received = recvfrom(server_fd, buffer, sizeof(buffer), 0,
-                                            (struct sockaddr*)&client_addr, &client_addr_len);
+                                           (struct sockaddr*)&client_addr, &client_addr_len);
             
             if (bytes_received == SOCKET_ERROR) {
+#ifdef _WIN32
                 int err = WSAGetLastError();
-                // WSAEWOULDBLOCK means no more packets are waiting right now
-                if (err == WSAEWOULDBLOCK) {
-                    break; 
-                } else {
-                    break; // Other read error
-                }
+                if (err == WSAEWOULDBLOCK) { break; }
+#else
+                if (errno == EWOULDBLOCK || errno == EAGAIN) { break; }
+#endif
+                break; // Other read error
             }
 
             // Validate packet size matches our expected structure
@@ -123,6 +154,8 @@ int main() {
     }
 
     closesocket(server_fd);
+#ifdef _WIN32
     WSACleanup();
+#endif
     return 0;
 }
