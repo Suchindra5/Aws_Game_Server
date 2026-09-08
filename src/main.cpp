@@ -183,9 +183,20 @@ int main() {
                 std::cout << "[Lobby: " << lobby.lobby_id << "] Player " << dropped_id << " timed out.\n";
             }
 
-            // Optional cleanup: If a lobby becomes completely empty, clear it from RAM to save memory
-            if (active_sessions.empty() && !dropped_players.empty()) {
+            // Re-check current active sessions after timeouts are applied
+            auto remaining_sessions = lobby.session_manager.get_active_sessions();
+
+            // If a lobby becomes completely empty, clear it from RAM and notify DynamoDB
+            if (remaining_sessions.empty()) {
                 std::cout << "[Server] Closing empty lobby: " << lobby.lobby_id << "\n";
+                
+                // Optional AWS cleanup webhook call
+                std::string jsonPayload = "{\"lobbyId\":\"" + lobby.lobby_id + "\"}";
+                std::string command = "curl -s -X POST https://cuew6bc8y1.execute-api.ap-south-1.amazonaws.com/closelobby "
+                                      "-H \"Content-Type: application/json\" "
+                                      "-d '" + jsonPayload + "' > /dev/null &";
+                system(command.c_str());
+
                 it = active_lobbies.erase(it);
             } else {
                 ++it;
