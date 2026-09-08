@@ -2,61 +2,61 @@ import socket
 import struct
 import time
 import threading
-import random
 
-SERVER_IP = "13.203.224.151"  # Your AWS EC2 IP
+SERVER_IP = "127.0.0.1"
 SERVER_PORT = 8080
-NUM_CLIENTS = 10         # Number of concurrent players to simulate
-TICK_RATE = 20           # 20 packets per second per client
-INTERVAL = 1.0 / TICK_RATE
 
-def run_client(player_id):
-    client_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    client_socket.settimeout(0.1)
+def simulate_client(lobby_id, player_id, start_x, start_y):
+    # Each thread gets its own UDP socket
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.settimeout(2.0)
     
-    # Start each client at a random initial position
-    x = random.uniform(0.0, 500.0)
-    y = random.uniform(0.0, 500.0)
-    sequence = 0
+    print(f"[Client {player_id}] Starting simulation for Lobby '{lobby_id}'...")
 
-    print(f"[Client {player_id}] Started, streaming & listening to {SERVER_IP}:{SERVER_PORT}")
+    sequence = 0
+    x_pos = start_x
+    y_pos = start_y
 
     try:
-        while True:
-            # Simulate slight movement
-            x += random.uniform(-1.5, 1.5)
-            y += random.uniform(-1.5, 1.5)
+        for i in range(15):  # Send 15 ticks per client
             sequence += 1
+            x_pos += 1.5
+            y_pos += 1.0
 
-            # 1. Send packet matching C++ ClientPacket structure ("IIff")
-            packet = struct.pack("IIff", player_id, sequence, x, y)
-            client_socket.sendto(packet, (SERVER_IP, SERVER_PORT))
-            
-            # 2. Receive response matching C++ ServerResponsePacket structure ("II")
+            # Pack data matching C++ struct ClientPacket (<32sIIff)
+            encoded_lobby_id = lobby_id.encode('utf-8').ljust(32, b'\x00')
+            packet_data = struct.pack('<32sIIff', encoded_lobby_id, player_id, sequence, x_pos, y_pos)
+
+            sock.sendto(packet_data, (SERVER_IP, SERVER_PORT))
+            print(f"[Lobby: {lobby_id}] Player {player_id} sent Seq {sequence} | Pos: ({x_pos:.1f}, {y_pos:.1f})")
+
             try:
-                data, _ = client_socket.recvfrom(1024)
-                if len(data) == 8:  # 2 uint32 fields = 8 bytes
-                    packet_type, nearby_count = struct.unpack("II", data)
-                    # Print only for Client 1 to avoid flooding the screen too fast
-                    if player_id == 1 and sequence % 20 == 0:
-                        print(f"[Client {player_id}] Sent Pos ({x:.1f}, {y:.1f}) | Server Response -> Nearby Peers: {nearby_count}")
+                response_data, _ = sock.recvfrom(1024)
+                if len(response_data) == 8:
+                    pkt_type, nearby_count = struct.unpack('<II', response_data)
+                    print(f"[Lobby: {lobby_id}] Player {player_id} received response -> Nearby Peers: {nearby_count}")
             except socket.timeout:
-                pass  
-            
-            time.sleep(INTERVAL)
-            
-    except KeyboardInterrupt:
-        client_socket.close()
+                print(f"[Lobby: {lobby_id}] Player {player_id} response timed out.")
+
+            time.sleep(0.05)  # 20 TPS tick rate
+
+    finally:
+        sock.close()
+        print(f"[Client {player_id}] Finished and closed socket.")
 
 if __name__ == "__main__":
-    print(f"[Spawner] Launching {NUM_CLIENTS} concurrent bidirectional clients...")
-    threads = []
+    print(f"[Main] Spawning two clients for two different lobbies...")
 
-    for i in range(1, NUM_CLIENTS + 1):
-        t = threading.Thread(target=run_client, args=(i,))
-        threads.append(t)
-        t.start()
-        time.sleep(0.05)
+    # Create two threads representing players in distinct lobbies
+    thread1 = threading.Thread(target=simulate_client, args=("lobby_ALPHA_100", 101, 10.0, 20.0))
+    thread2 = threading.Thread(target=simulate_client, args=("lobby_BETA_200", 201, 500.0, 600.0))
 
-    for t in threads:
-        t.join()
+    # Start both threads concurrently
+    thread1.start()
+    thread2.start()
+
+    # Wait for both simulations to finish
+    thread1.join()
+    thread2.join()
+
+    print("[Main] Both lobby simulations completed successfully!")
