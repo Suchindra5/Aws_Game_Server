@@ -113,7 +113,7 @@ int main() {
         while (true) {
             client_addr_len = sizeof(client_addr); 
             int bytes_received = recvfrom(server_fd, buffer, sizeof(buffer), 0,
-                                     (struct sockaddr*)&client_addr, &client_addr_len);
+                                         (struct sockaddr*)&client_addr, &client_addr_len);
             
             if (bytes_received == SOCKET_ERROR) {
 #ifdef _WIN32
@@ -146,6 +146,15 @@ int main() {
                 std::cout << "[Lobby: " << lobby_key << "] Player " << packet.player_id 
                           << " | Pos: (" << packet.x << ", " << packet.y << ")"
                           << " | Nearby: " << nearby.size() << "\n";
+
+                // Broadcast player's movement packet to all other peers in the same lobby
+                auto active_sessions = lobby.session_manager.get_active_sessions();
+                for (const auto& session : active_sessions) {
+                    if (session.player_id != packet.player_id) {
+                        sendto(server_fd, buffer, bytes_received, 0,
+                               (struct sockaddr*)&session.address, sizeof(session.address));
+                    }
+                }
             }
         }
 
@@ -153,7 +162,7 @@ int main() {
         for (auto it = active_lobbies.begin(); it != active_lobbies.end(); ) {
             GameLobby& lobby = it->second;
 
-            // Broadcast states to active sessions in this lobby
+            // Broadcast states or acks to active sessions in this lobby
             auto active_sessions = lobby.session_manager.get_active_sessions();
             for (const auto& session : active_sessions) {
                 float px = lobby.spatial_grid.get_player_x(session.player_id);
